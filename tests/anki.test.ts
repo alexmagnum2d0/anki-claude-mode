@@ -1,7 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { compareTyped, isCurrentCard, todayLine } from '../hooks/register'
+import { compareTyped, isCurrentCard } from '../hooks/register'
+import { WORDS } from '../hooks/words'
 
 const PANE = {
   plugin: 'anki',
@@ -119,8 +120,22 @@ function fakeAnki(calls: Call[], isOnline: boolean, queue: FakeCard[]) {
 }
 
 // What a session answers beneath the plugin: registrations, panes, toasts, time.
-function boot(on: On, calls: Call[], isOnline = true, card = SIMPLE_CARD, played: string[] = [], focused: string[] = []) {
+// The store starts on Russian, as it was before the pane spoke English too.
+function boot(
+  on: On,
+  calls: Call[],
+  isOnline = true,
+  card = SIMPLE_CARD,
+  played: string[] = [],
+  focused: string[] = [],
+  store: Record<string, unknown> = { language: 'ru' },
+) {
   const clock = mock.clock(on)
+  on('store.get', ($, e) => ({ value: store[e.key] }))
+  on('store.set', ($, e) => {
+    store[e.key] = e.value
+    return { value: undefined }
+  })
   const anki = fakeAnki(calls, isOnline, [card, { ...card, cardId: card.cardId + 100 }])
   on('http.fetch', ($, e) => {
     try {
@@ -411,7 +426,50 @@ test('under the decks, what was studied today, worded as Anki words it', async (
   await settle()
   expect(await ui.find({ type: 'Text', text: 'Сегодня 3 карточки за 1,00 минут (20,00 с/карт.)' })).toBeDefined()
 
-  expect(todayLine({ cards: 17, seconds: 145.513 })).toBe('Сегодня 17 карточек за 2,43 минут (8,56 с/карт.)')
-  expect(todayLine({ cards: 21, seconds: 60 })).toMatch(/^Сегодня 21 карточка /)
-  expect(todayLine({ cards: 0, seconds: 0 })).toBe('Сегодня не было изучено ни одной карточки.')
+  expect(WORDS.ru.today({ cards: 17, seconds: 145.513 })).toBe('Сегодня 17 карточек за 2,43 минут (8,56 с/карт.)')
+  expect(WORDS.ru.today({ cards: 21, seconds: 60 })).toMatch(/^Сегодня 21 карточка /)
+  expect(WORDS.ru.today({ cards: 0, seconds: 0 })).toBe('Сегодня не было изучено ни одной карточки.')
+})
+
+// With nothing stored the pane speaks English; its button switches to Russian
+// and the store keeps the pick for the next session.
+test('the pane speaks English until Russian is picked, and keeps the pick', async ($, on) => {
+  const calls: Call[] = []
+  const store: Record<string, unknown> = {}
+  const settle = boot(on, calls, true, SIMPLE_CARD, [], [], store)
+  await $.session.start(START)
+  await $.command.run({ command: 'anki', args: '' } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await settle()
+  expect(await ui.find({ type: 'Text', text: 'Decks' })).toBeDefined()
+  for (const letter of ['N', 'L', 'D']) expect(await ui.find({ type: 'Text', text: letter })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Studied 3 cards in 1.00 minutes today (20.00s/card)' })).toBeDefined()
+
+  await ui.press({ key: 'deck:Spanish' })
+  await settle()
+  expect(await ui.find({ type: 'Button', text: /Show answer/ })).toBeDefined()
+  await ui.press({ key: 'main' })
+  await settle()
+  for (const label of ['Again', 'Hard', 'Good', 'Easy']) expect(await ui.find({ type: 'Button', text: new RegExp(label) })).toBeDefined()
+  await ui.press({ key: 'home' })
+  await settle()
+
+  await ui.press({ key: 'language' })
+  await settle()
+  expect(store.language).toBe('ru')
+  expect(await ui.find({ type: 'Text', text: 'Колоды' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', text: /English/ })).toBeDefined()
+})
+
+test('/anki en switches the pane to English', async ($, on) => {
+  const store: Record<string, unknown> = { language: 'ru' }
+  const settle = boot(on, [], true, SIMPLE_CARD, [], [], store)
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await $.command.run({ command: 'anki', args: 'en' } as never)
+  await settle()
+  expect(store.language).toBe('en')
+  expect(await ui.find({ type: 'Text', text: 'Decks' })).toBeDefined()
+  expect(WORDS.en.today({ cards: 1, seconds: 6 })).toBe('Studied 1 card in 0.10 minutes today (6.00s/card)')
+  expect(WORDS.en.today({ cards: 0, seconds: 0 })).toBe('No cards have been studied today.')
 })

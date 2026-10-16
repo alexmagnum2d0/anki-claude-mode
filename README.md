@@ -1,44 +1,50 @@
 # anki-claude-mode
 
-Мод для [Claude Code](https://claude.com/claude-code): панель Anki прямо в Claude — в десктопном приложении и в терминале. Работает через [AnkiConnect](https://ankiweb.net/shared/info/2055492159).
+**English** · [Русский](README.ru.md)
 
-*A Claude Code mod: an Anki pane inside Claude (desktop app and terminal) through AnkiConnect. The interface is in Russian.*
+A mod for [Claude Code](https://claude.com/claude-code): an Anki pane right inside Claude, in the desktop app and in the terminal. It talks to Anki through [AnkiConnect](https://ankiweb.net/shared/info/2055492159). The pane speaks English or Russian.
 
-## Что умеет
+## What it does
 
-- **Колоды** — список всех колод с подколодами и счётчиками «Н» (новые), «И» (изучаемые), «П» (к повторению) в цветах Anki, а под ними строка «Сегодня N карточек за … минут (… с/карт.)», как в Anki.
-- **Повторение** — карточки показываются так, как их показывает Anki: картинки, звук (кнопки 🔊), поле для ввода ответа (`{{type:…}}`) с побуквенным сравнением, как в Anki, и кнопки оценки с интервалами над ними.
-- **Карточки от Claude** — Claude получает два инструмента:
-  - `mcp__anki__decks` — посмотреть колоды и сколько в них к повторению;
-  - `mcp__anki__add_cards` — добавить карточки «вопрос / ответ» в колоду (создаёт колоду, если её нет; тег `claude`).
+- **Decks**: every deck with its subdecks and the N (new), L (learning) and D (due) counts in Anki's colors, with Anki's line under them: "Studied N cards in … minutes today (…s/card)".
+- **Review**: cards look the way Anki shows them, with pictures, sound (🔊 buttons), the typed-answer field (`{{type:…}}`) checked letter by letter as Anki does, and the grade buttons with their intervals above them.
+- **Cards from Claude**: Claude gets two tools:
+  - `mcp__anki__decks` lists the decks and what is due in each;
+  - `mcp__anki__add_cards` adds front/back cards to a deck. It creates the deck if it does not exist and tags the cards `claude`.
 
-  Например: «сделай 20 карточек по сербским глаголам движения в колоду „Сербский язык“».
+  For example: "make 20 cards on Serbian verbs of motion in the deck Serbian".
 
-Повторение идёт через сам Anki (его окно повторения), поэтому порядок карточек, интервалы и история — те же, что при обычном повторении.
+Review runs through Anki itself (its own reviewer), so the card order, intervals and history are the same as in a normal Anki session.
 
-## Что нужно
+## Requirements
 
-1. [Anki](https://apps.ankiweb.net/) на этом же компьютере, запущенный во время работы.
-2. Дополнение AnkiConnect: в Anki «Инструменты → Дополнения → Получить дополнения…», код `2055492159`, затем перезапустить Anki.
+1. [Anki](https://apps.ankiweb.net/) on the same computer, running while you use the pane.
+2. The AnkiConnect add-on: in Anki, Tools → Add-ons → Get Add-ons…, code `2055492159`, then restart Anki.
 3. Claude Code.
 
-## Установка
+## Install
 
-В терминальной сессии Claude Code:
+In a Claude Code terminal session:
 
 ```
 /plugin install anki --marketplace alexmagnum2d0/anki-claude-mode
 ```
 
-Ответьте `y` на вопрос о добавлении маркетплейса и выберите область (user — для всех сессий). После установки мод работает и в сессиях Code в десктопном приложении Claude.
+Answer `y` to add the marketplace and pick a scope (user, for every session). Once installed, the mod also works in Code sessions in the Claude desktop app.
 
-## Использование
+## Use
 
-- `/anki` — открыть панель.
-- Нажмите на колоду, чтобы начать повторение, «← Колоды» — чтобы вернуться.
-- В терминале у кнопок оценки есть горячие клавиши 1–4; в десктопном приложении клавиши в панель не попадают, поэтому там только кнопки.
+- `/anki` opens the pane.
+- Click a deck to start reviewing; "← Decks" goes back.
+- In the terminal, grade buttons also answer to keys 1–4. The desktop app keeps keys for the prompt, so there you use the buttons.
 
-## Разработка
+## Language
+
+The pane starts in English. To switch, click "Русский" / "English" next to "Refresh" in the deck list, or run `/anki ru` or `/anki en`. The choice is kept across sessions.
+
+The words live in [`hooks/words.ts`](hooks/words.ts), one block per language.
+
+## Development
 
 ```bash
 claude plugin validate .
@@ -48,8 +54,8 @@ claude plugin validate .
 claude plugin test .
 ```
 
-Чтобы запускать мод из этой папки: `claude --plugin-dir /путь/к/anki-claude-mode`.
+To run the mod from this folder: `claude --plugin-dir /path/to/anki-claude-mode`.
 
-## Лицензия
+## License
 
 MIT

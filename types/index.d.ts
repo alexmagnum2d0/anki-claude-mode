@@ -24,8 +24,14 @@ export type AnkiCard = {
   isAnswerShown: boolean
 }
 
+// Why a media file is not drawn.
+export type MissingImage = 'not-image' | 'no-file' | 'too-large' | 'unreadable'
+
 // A media file drawn as an SVG holding it, or why it is not drawn.
-export type AnkiImage = { svg: string; width: number; height: number } | { missing: string }
+export type AnkiImage = { svg: string; width: number; height: number } | { missing: MissingImage; reason?: string }
+
+// The language the pane speaks.
+export type AnkiLanguage = 'en' | 'ru'
 
 // What was studied today, across every deck.
 export type AnkiToday = { cards: number; seconds: number }
@@ -47,6 +53,7 @@ declare module 'claude-code' {
       busy: boolean
       added: string[]
       today: AnkiToday | null
+      language: AnkiLanguage
     }
   }
 }

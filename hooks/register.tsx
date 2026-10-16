@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AnkiCard, AnkiConnection, AnkiDeck, AnkiImage, AnkiToday, CardPart } from '../types'
+import type { AnkiCard, AnkiConnection, AnkiDeck, AnkiImage, AnkiLanguage, AnkiToday, CardPart } from '../types'
+import { isLanguage, WORDS, type Words } from './words'
 
 const PANE = 'anki'
 const ANKI_URL = 'http://127.0.0.1:8765'
@@ -19,6 +20,8 @@ const busy = atom({ plugin: 'anki', key: 'busy' } as const, false)
 const reviewedCount = atom({ plugin: 'anki', key: 'reviewedCount' } as const, 0)
 const added = atom({ plugin: 'anki', key: 'added' } as const, [] as string[])
 const today = atom({ plugin: 'anki', key: 'today' } as const, null as AnkiToday | null)
+// English until the person picks; the pick is kept in the store across sessions.
+const language = atom({ plugin: 'anki', key: 'language' } as const, 'en' as AnkiLanguage)
 
 type $ = EngineInterface
 
@@ -206,23 +209,13 @@ async function refreshToday($: $): Promise<void> {
   }
 }
 
-// The Russian plural form for a whole count: 1 карточка, 2 карточки, 5 карточек.
-function plural(count: number, one: string, few: string, many: string): string {
-  const tens = count % 100
-  const units = count % 10
-  if (tens >= 11 && tens <= 14) return many
-  if (units === 1) return one
-  if (units >= 2 && units <= 4) return few
-  return many
+async function words($: $): Promise<Words> {
+  return WORDS[await read($, language)]
 }
 
-const decimal = (value: number) => value.toFixed(2).replace('.', ',')
-
-// Worded as Anki words it: «Сегодня 17 карточек за 2,43 минут (8,56 с/карт.)».
-export function todayLine(value: AnkiToday): string {
-  if (value.cards === 0) return 'Сегодня не было изучено ни одной карточки.'
-  const cards = `${value.cards} ${plural(value.cards, 'карточка', 'карточки', 'карточек')}`
-  return `Сегодня ${cards} за ${decimal(value.seconds / 60)} минут (${decimal(value.seconds / value.cards)} с/карт.)`
+async function setLanguage($: $, value: AnkiLanguage): Promise<void> {
+  await update($, language, () => value)
+  await $.store.set('language', value)
 }
 
 // What guiCurrentCard answers: the card Anki's own reviewer shows now.
@@ -362,10 +355,10 @@ function mimeOf(file: string): string | undefined {
 
 async function loadImage($: $, file: string): Promise<AnkiImage> {
   const mime = mimeOf(file)
-  if (mime === undefined || !mime.startsWith('image/')) return { missing: 'не картинка' }
+  if (mime === undefined || !mime.startsWith('image/')) return { missing: 'not-image' }
   const base64 = await anki<string | false>($, 'retrieveMediaFile', { filename: file })
-  if (base64 === false) return { missing: 'файла нет' }
-  if (base64.length > MAX_IMAGE_BASE64) return { missing: 'слишком большая для панели' }
+  if (base64 === false) return { missing: 'no-file' }
+  if (base64.length > MAX_IMAGE_BASE64) return { missing: 'too-large' }
   const size = imageSize(bytesOf(base64)) ?? { width: 400, height: 300 }
   const { width, height } = size
 
@@ -388,7 +381,7 @@ async function loadImages($: $, card: AnkiCard): Promise<void> {
     try {
       image = await loadImage($, file)
     } catch (error) {
-      image = { missing: reasonOf(error) }
+      image = { missing: 'unreadable', reason: reasonOf(error) }
     }
     await update($, images, all => ({ ...all, [file]: image }))
   }
@@ -402,7 +395,7 @@ async function playSounds($: $, files: string[]): Promise<void> {
       if (base64 === false) continue
       await $.audio.play({ base64, mime: mimeOf(file) ?? 'audio/mpeg' })
     } catch (error) {
-      $.ui.toast(`Anki: звук не играет: ${reasonOf(error)}`)
+      $.ui.toast((await words($)).soundFailed(reasonOf(error)))
       return
     }
   }
@@ -439,27 +432,18 @@ async function showAnswer($: $, typed: string | null): Promise<void> {
 }
 
 // Anki's buttons by count: 4 is Again/Hard/Good/Easy, 3 drops Hard, 2 is
-// Again/Good. "Good" is keyed "main", the key "Показать ответ" has too.
-const GRADES: Record<number, { key: string; label: string }[]> = {
-  2: [
-    { key: 'again', label: 'Снова' },
-    { key: 'main', label: 'Хорошо' },
-  ],
-  3: [
-    { key: 'again', label: 'Снова' },
-    { key: 'main', label: 'Хорошо' },
-    { key: 'easy', label: 'Легко' },
-  ],
-  4: [
-    { key: 'again', label: 'Снова' },
-    { key: 'hard', label: 'Трудно' },
-    { key: 'main', label: 'Хорошо' },
-    { key: 'easy', label: 'Легко' },
-  ],
+// Again/Good. "Good" is keyed "main", the key "Show answer" has too.
+type GradeKey = keyof Words['grades']
+
+const GRADES: Record<number, GradeKey[]> = {
+  2: ['again', 'main'],
+  3: ['again', 'main', 'easy'],
+  4: ['again', 'hard', 'main', 'easy'],
 }
 
-function gradeOf(ease: number, count: number): { key: string; label: string } {
-  return GRADES[count]?.[ease - 1] ?? { key: `ease-${ease}`, label: String(ease) }
+function gradeOf(ease: number, count: number, w: Words): { key: string; label: string } {
+  const key = GRADES[count]?.[ease - 1]
+  return key === undefined ? { key: `ease-${ease}`, label: String(ease) } : { key, label: w.grades[key] }
 }
 
 // A short one-line text (a word, a phrase) is drawn as a heading: the card's
@@ -534,7 +518,7 @@ async function loadCurrentCard($: $): Promise<void> {
     await update($, review, () => null)
     await update($, reviewDeck, () => null)
     // Anki stays on its own "Congratulations" page, as it does without the pane.
-    $.ui.toast(`Anki: в колоде «${deck ?? ''}» на сегодня всё`)
+    $.ui.toast((await words($)).deckDone(deck ?? ''))
     await refreshDecks($)
     return
   }
@@ -559,7 +543,7 @@ async function startReview($: $, deck: string): Promise<void> {
   // in Anki). Ask fresh counts first, and leave Anki alone when there is none.
   const stats = Object.values(await anki<DeckStats>($, 'getDeckStats', { decks: [deck] }))[0]
   if (stats !== undefined && stats.new_count + stats.learn_count + stats.review_count === 0) {
-    $.ui.toast(`Anki: в колоде «${deck}» сейчас нечего повторять`)
+    $.ui.toast((await words($)).nothingDue(deck))
     await refreshDecks($)
     return
   }
@@ -583,7 +567,7 @@ async function answerCard($: $, cardId: number, ease: number): Promise<void> {
   // Anki's own window), show that one instead.
   const shown = await anki<CardInfo>($, 'guiCurrentCard').catch(() => null)
   if (shown?.cardId !== cardId) {
-    $.ui.toast('Anki: карточка в Anki сменилась, показываю текущую')
+    $.ui.toast((await words($)).cardChanged)
     await loadCurrentCard($)
     return
   }
@@ -628,7 +612,7 @@ async function addCards($: $, deck: string, cards: NewCard[], tags: string[]): P
   }
   await update($, added, list => [...done.map(front => `${deck} · ${front}`), ...(list ?? [])].slice(0, 20))
   await refreshDecks($)
-  if (done.length > 0) $.ui.toast(`Anki: добавлено ${done.length} в «${deck}»`)
+  if (done.length > 0) $.ui.toast((await words($)).added(done.length, deck))
 
   return [
     `Added ${done.length} of ${cards.length} cards to "${deck}" (note type "${model}", tag "claude").`,
@@ -674,6 +658,8 @@ export const register: Register = on => {
       },
       isDeferred: false,
     })
+    const saved = await $.store.get('language').catch(() => undefined)
+    if (isLanguage(saved) && saved !== (await read($, language))) await update($, language, () => saved)
     $.clock.every(POLL_MS, async () => {
       const isOpen = (await $.ui.panes()).some(pane => pane.id === PANE)
       if (isOpen && (await read($, reviewDeck)) === null) await refreshDecks($)
@@ -682,10 +668,13 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'anki' }, async $ => {
+  // `/anki en` or `/anki ru` also sets the language the pane speaks.
+  on('command.run', { command: 'anki' }, async ($, e) => {
+    const asked = e.args.trim().toLowerCase()
+    if (isLanguage(asked)) await setLanguage($, asked)
     await openPane($)
 
-    return { text: 'Anki pane opened.' }
+    return { text: isLanguage(asked) ? `Anki pane opened (${asked}).` : 'Anki pane opened.' }
   })
 
   on('tool.call', { tool: 'mcp__anki__decks' }, async $ => {
@@ -735,21 +724,20 @@ export const register: Register = on => {
       })
     }
     const state = await read($, connection)
+    const lang = await read($, language)
+    const w = WORDS[lang]
 
-    if (state.kind === 'unknown') return <Text dimColor>Подключаюсь к Anki…</Text>
+    if (state.kind === 'unknown') return <Text dimColor>{w.connecting}</Text>
 
     if (state.kind === 'offline') {
       return (
         <Box flexDirection="column" gap={1}>
-          <Text bold>Anki не отвечает</Text>
-          <Text dimColor>
-            Откройте Anki. Если он уже открыт, установите аддон AnkiConnect: Инструменты → Дополнения → Получить
-            дополнения, код {ANKICONNECT_CODE}, затем перезапустите Anki.
-          </Text>
+          <Text bold>{w.offline}</Text>
+          <Text dimColor>{w.offlineHelp(ANKICONNECT_CODE)}</Text>
           <Text dimColor>{state.reason}</Text>
           <Box>
             <Button {...bind('retry', () => act($, () => refreshDecks($)))} variant="primary">
-              Проверить снова
+              {w.retry}
             </Button>
           </Box>
         </Box>
@@ -771,9 +759,14 @@ export const register: Register = on => {
 
       const drawImage = (file: string) => {
         const image = media[file]
-        if (image === undefined) return <Text dimColor>🖼 загружаю…</Text>
+        if (image === undefined) return <Text dimColor>{w.loadingImage}</Text>
         if ('missing' in image || Svg === undefined) {
-          return <Text dimColor>{`🖼 ${file}${'missing' in image ? `: ${image.missing}` : ''}`}</Text>
+          // A reason kept from an older version is drawn as it was kept.
+          const reason =
+            'missing' in image
+              ? `: ${w.missing[image.missing] ?? String(image.missing)}${image.reason === undefined ? '' : ` (${image.reason})`}`
+              : ''
+          return <Text dimColor>{`🖼 ${file}${reason}`}</Text>
         }
         const width = Math.min(image.width, 320)
 
@@ -789,14 +782,14 @@ export const register: Register = on => {
 
       const drawType = (expected: string, side: 'q' | 'a') => {
         if (side === 'q') {
-          if (Input === undefined) return <Text dimColor>[поле для ответа]</Text>
+          if (Input === undefined) return <Text dimColor>{w.answerField}</Text>
 
           return (
             <Box width="100%">
               <Input
                 key="typed"
-                placeholder="Ваш ответ"
-                submitLabel="Проверить"
+                placeholder={w.yourAnswer}
+                submitLabel={w.check}
                 autoFocus
                 onInput={value => {
                   draft = value
@@ -847,7 +840,7 @@ export const register: Register = on => {
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="row" justifyContent="space-between" alignItems="center">
             <Button {...bind('home', () => act($, () => stopReview($)))} plain dimColor>
-              ← Колоды
+              {w.backToDecks}
             </Button>
             <Text dimColor wrap="truncate-end">
               {card.deck} · {isBusy ? '…' : String(count)}
@@ -859,7 +852,7 @@ export const register: Register = on => {
           <Box flexDirection="row" justifyContent="center" alignItems="flex-end" gap={2} flexWrap="wrap">
             {card.isAnswerShown ? (
               card.grades.map(({ ease, next }) => {
-                const grade = gradeOf(ease, card.grades.length)
+                const grade = gradeOf(ease, card.grades.length, w)
 
                 // As Anki draws them: the interval a grade sets, above its button.
                 return (
@@ -873,11 +866,11 @@ export const register: Register = on => {
               })
             ) : hasTypeField ? (
               <Button {...bind('main', () => act($, () => showAnswer($, draft)))} variant="primary">
-                Показать ответ
+                {w.showAnswer}
               </Button>
             ) : (
               <Button {...bind('main', () => act($, () => showAnswer($, null)))} {...hotkey('s')} variant="primary">
-                Показать ответ
+                {w.showAnswer}
               </Button>
             )}
           </Box>
@@ -902,28 +895,33 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" gap={1}>
         <Box flexDirection="row" justifyContent="space-between" alignItems="center">
-          <Text bold>Колоды</Text>
-          <Button
-            {...bind('home', () =>
-              act($, async () => {
-                await refreshDecks($)
-                $.ui.toast('Anki: колоды обновлены')
-              }),
-            )}
-            plain
-            dimColor
-          >
-            ↻ Обновить
-          </Button>
+          <Text bold>{w.decks}</Text>
+          <Box flexDirection="row" gap={2}>
+            <Button {...bind('language', () => act($, () => setLanguage($, lang === 'en' ? 'ru' : 'en')))} plain dimColor>
+              {w.switchTo}
+            </Button>
+            <Button
+              {...bind('home', () =>
+                act($, async () => {
+                  await refreshDecks($)
+                  $.ui.toast((await words($)).refreshed)
+                }),
+              )}
+              plain
+              dimColor
+            >
+              {w.refresh}
+            </Button>
+          </Box>
         </Box>
-        {list.length === 0 && <Text dimColor>Колод нет.</Text>}
+        {list.length === 0 && <Text dimColor>{w.noDecks}</Text>}
         <Box flexDirection="column">
           {list.length > 0 && (
             <Box key="counts" flexDirection="row" justifyContent="flex-end">
               <Box flexDirection="row" gap={1}>
-                {heading('Н', 'new')}
-                {heading('И', 'learn')}
-                {heading('П', 'review')}
+                {heading(w.headings.new, 'new')}
+                {heading(w.headings.learn, 'learn')}
+                {heading(w.headings.review, 'review')}
               </Box>
             </Box>
           )}
@@ -957,12 +955,12 @@ export const register: Register = on => {
         </Box>
         {studied !== null && list.length > 0 && (
           <Box flexDirection="row" justifyContent="center">
-            <Text>{todayLine(studied)}</Text>
+            <Text>{w.today(studied)}</Text>
           </Box>
         )}
         {recent.length > 0 && (
           <Box flexDirection="column">
-            <Text bold>Добавлено Claude</Text>
+            <Text bold>{w.addedByClaude}</Text>
             {recent.map(line => (
               <Text dimColor wrap="truncate-end">
                 {line}
