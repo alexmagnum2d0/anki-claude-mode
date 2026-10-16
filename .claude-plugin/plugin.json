@@ -1,0 +1,17 @@
+{
+  "name": "anki",
+  "version": "0.1.0",
+  "description": "Anki pane in Claude Code: decks, review as in Anki, and cards Claude adds, through AnkiConnect",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "alexmagnum2d0"
+  },
+  "repository": "https://github.com/alexmagnum2d0/anki-claude-mode",
+  "license": "MIT",
+  "keywords": [
+    "anki",
+    "flashcards",
+    "ankiconnect",
+    "pane"
+  ]
+}

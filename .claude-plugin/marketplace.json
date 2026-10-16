@@ -1,0 +1,13 @@
+{
+  "name": "anki-claude-mode",
+  "owner": {
+    "name": "alexmagnum2d0"
+  },
+  "plugins": [
+    {
+      "name": "anki",
+      "source": "./"
+    }
+  ],
+  "description": "Anki pane for Claude Code"
+}
